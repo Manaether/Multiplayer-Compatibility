@@ -90,6 +90,7 @@ PowerSwitch | [![url][steam]](https://steamcommunity.com/sharedfiles/filedetails
 Prison Commons | [![url][steam]](https://steamcommunity.com/workshop/filedetails/?id=2630896782) 
 Processor Framework | [![url][steam]](https://steamcommunity.com/workshop/filedetails/?id=2633514537) [![url][repo]](https://github.com/Syrchalis/ProcessorFramework)
 Quality Builder | [![url][steam]](https://steamcommunity.com/sharedfiles/filedetails/?id=754637870) 
+Radius UI - Colonist Bar | [![url][steam]](https://steamcommunity.com/sharedfiles/filedetails/?id=3788278207)
 Radius UI - Faction Menu | [![url][steam]](https://steamcommunity.com/sharedfiles/filedetails/?id=3786945713)
 Radius UI - Health Tab | [![url][steam]](https://steamcommunity.com/sharedfiles/filedetails/?id=3786129210)
 Radius UI - Inspector | [![url][steam]](https://steamcommunity.com/sharedfiles/filedetails/?id=3786131805)

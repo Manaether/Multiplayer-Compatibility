@@ -108,6 +108,8 @@ namespace Multiplayer.Compat
         private static AccessTools.FieldRef<object, int> settingsWriteIntervalTicksField;
         private static AccessTools.FieldRef<object, int> settingsWritesPerPassField;
         private static AccessTools.FieldRef<object, float> settingsSemiConfidenceField;
+        private static AccessTools.FieldRef<object, bool> settingsToastsSuggestField;
+        private static AccessTools.FieldRef<object, bool> settingsToastsLearningField;
         private static MethodInfo writeSettingsMethod;
         private static MethodInfo dropCellToastMethod;
         private static MethodInfo emergencyCoverTuningMethod;
@@ -225,6 +227,8 @@ namespace Multiplayer.Compat
             settingsWriteIntervalTicksField = AccessTools.FieldRefAccess<int>(awSettingsType, "writeIntervalTicks");
             settingsWritesPerPassField = AccessTools.FieldRefAccess<int>(awSettingsType, "writesPerPass");
             settingsSemiConfidenceField = AccessTools.FieldRefAccess<float>(awSettingsType, "semiConfidence");
+            settingsToastsSuggestField = AccessTools.FieldRefAccess<bool>(awSettingsType, "toastsSuggest");
+            settingsToastsLearningField = AccessTools.FieldRefAccess<bool>(awSettingsType, "toastsLearning");
             writeSettingsMethod = AccessTools.Method(typeof(ModSettings), nameof(ModSettings.Write));
             dropCellToastMethod = AccessTools.Method(toastsType, "DropCell", new[] { typeof(long) });
             emergencyCoverTuningMethod = AccessTools.Method(workTypeTuningDefType, "EmergencyCover", new[] { typeof(WorkTypeDef) });
@@ -246,7 +250,6 @@ namespace Multiplayer.Compat
             if (learningStoreNeverMethod != null) MP.RegisterSyncMethod(learningStoreNeverMethod);
             if (learningStoreResetLearningMethod != null) MP.RegisterSyncMethod(learningStoreResetLearningMethod);
             if (learningStoreUndoLastMethod != null) MP.RegisterSyncMethod(learningStoreUndoLastMethod);
-            if (priorityWriterApplyMethod != null) MP.RegisterSyncMethod(priorityWriterApplyMethod);
             if (priorityWriterEnsureNumericModeMethod != null)
             {
                 MP.RegisterSyncMethod(priorityWriterEnsureNumericModeMethod);
@@ -263,6 +266,35 @@ namespace Multiplayer.Compat
             MP.RegisterSyncMethod(typeof(AdaptiveWorkPriorities), nameof(SyncedToggleLock));
             MP.RegisterSyncMethod(typeof(AdaptiveWorkPriorities), nameof(SyncedSetChain));
             MP.RegisterSyncMethod(typeof(AdaptiveWorkPriorities), nameof(SyncedApplyAll));
+            MP.RegisterSyncMethod(typeof(AdaptiveWorkPriorities), nameof(SyncedApplyManual));
+
+            // Harmony Patches - PriorityWriter Manual Sync Interception
+            if (priorityWriterApplyMethod != null)
+            {
+                MpCompat.harmony.Patch(
+                    priorityWriterApplyMethod,
+                    prefix: new HarmonyMethod(typeof(AdaptiveWorkPriorities), nameof(PrefixPriorityWriterApply)));
+            }
+
+            // Harmony Patches - Toasts Deterministic Ticks Throttling
+            if (toastsType != null)
+            {
+                var notifySignalMethod = AccessTools.Method(toastsType, "NotifySignal");
+                if (notifySignalMethod != null)
+                {
+                    MpCompat.harmony.Patch(
+                        notifySignalMethod,
+                        prefix: new HarmonyMethod(typeof(AdaptiveWorkPriorities), nameof(PrefixNotifySignal)));
+                }
+
+                var notifyAppliedMethod = AccessTools.Method(toastsType, "NotifyApplied");
+                if (notifyAppliedMethod != null)
+                {
+                    MpCompat.harmony.Patch(
+                        notifyAppliedMethod,
+                        prefix: new HarmonyMethod(typeof(AdaptiveWorkPriorities), nameof(PrefixNotifyApplied)));
+                }
+            }
 
             // Harmony Patches - LearningStore Multi-Map Determinism
             MpCompat.harmony.Patch(
@@ -512,6 +544,12 @@ namespace Multiplayer.Compat
                 }
             }
             learningStoreMarkAllDirtyMethod?.Invoke(learningStoreInstanceProp?.GetValue(null), null);
+        }
+
+        [SyncMethod]
+        public static void SyncedApplyManual(Pawn pawn, WorkTypeDef wt, int to)
+        {
+            priorityWriterApplyMethod?.Invoke(null, new object[] { pawn, wt, to, true, true });
         }
 
         #endregion
@@ -932,6 +970,64 @@ namespace Multiplayer.Compat
         #endregion
 
         #region UI Interceptions
+
+        private static int lastAppliedAtTick = -99999;
+        private static int lastLearnAtTick = -99999;
+
+        private static bool PrefixPriorityWriterApply(Pawn pawn, WorkTypeDef wt, int to, bool manualGesture, bool recordUndo)
+        {
+            if (!MP.IsInMultiplayer)
+                return true;
+
+            if (MP.InInterface && manualGesture)
+            {
+                SyncedApplyManual(pawn, wt, to);
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool PrefixNotifySignal(Pawn pawn, WorkTypeDef wt, object kind, string label)
+        {
+            if (!MP.IsInMultiplayer)
+                return true;
+
+            var settings = GetSettings();
+            int ticksGame = Find.TickManager.TicksGame;
+            int kindInt = kind != null ? (int)kind : 0;
+            if (settings != null && settingsToastsLearningField != null && settingsToastsLearningField(settings) && kindInt != 2 && kindInt != 3 && (ticksGame - lastLearnAtTick >= 300 || lastLearnAtTick > ticksGame))
+            {
+                lastLearnAtTick = ticksGame;
+                if (pawn != null && wt != null)
+                {
+                    string wtLabel = wt.labelShort.NullOrEmpty() ? wt.label : wt.labelShort;
+                    Messages.Message("AW.Msg.Learned".Translate(pawn.LabelShortCap, wtLabel), pawn, MessageTypeDefOf.SilentInput, false);
+                }
+            }
+            return false;
+        }
+
+        private static bool PrefixNotifyApplied(Pawn pawn, WorkTypeDef wt, int from, int to)
+        {
+            if (!MP.IsInMultiplayer)
+                return true;
+
+            var settings = GetSettings();
+            int ticksGame = Find.TickManager.TicksGame;
+            if (settings != null && settingsToastsSuggestField != null && settingsToastsSuggestField(settings) && (ticksGame - lastAppliedAtTick >= 240 || lastAppliedAtTick > ticksGame))
+            {
+                lastAppliedAtTick = ticksGame;
+                if (pawn != null && wt != null)
+                {
+                    string wtLabel = wt.labelShort.NullOrEmpty() ? wt.label : wt.labelShort;
+                    string fromStr = from == 0 ? (string)"AW.Off".Translate() : from.ToString();
+                    string toStr = to == 0 ? (string)"AW.Off".Translate() : to.ToString();
+                    Messages.Message("AW.Msg.Applied".Translate(pawn.LabelShortCap, wtLabel, fromStr, toStr), pawn, MessageTypeDefOf.SilentInput, false);
+                }
+            }
+            return false;
+        }
 
         private static bool PrefixPawnProfileToggleLock(object __instance, WorkTypeDef wt)
         {
