@@ -117,7 +117,6 @@ Search and Destroy | [![url][steam]](https://steamcommunity.com/sharedfiles/file
 Signs and Comments | [![url][steam]](https://steamcommunity.com/sharedfiles/filedetails/?id=2576219203) [![url][repo]](https://github.com/JTJutajoh/RimWorld.Signs)
 Simple Sidearms | [![url][steam]](https://steamcommunity.com/sharedfiles/filedetails/?id=927155256) [![url][repo]](https://github.com/PeteTimesSix/SimpleSidearms)
 Simply More Bridges | [![url][steam]](https://steamcommunity.com/sharedfiles/filedetails/?id=2012484790) [![url][repo]](https://github.com/emipa606/SimplyMoreBridges)
-Sleek Work Priorities | [![url][steam]](https://steamcommunity.com/sharedfiles/filedetails/?id=3764537806)
 Smarter Construction | [![url][steam]](https://steamcommunity.com/sharedfiles/filedetails/?id=2202185773) [![url][repo]](https://github.com/dhultgren/rimworld-smarter-construction)
 Smart Farming | [![url][steam]](https://steamcommunity.com/sharedfiles/filedetails/?id=2619652663) [![url][repo]](https://github.com/Owlchemist/smart-farming)
 Smart Medicine | [![url][steam]](https://steamcommunity.com/sharedfiles/filedetails/?id=1309994319) [![url][repo]](https://github.com/alextd/Rimworld-SmartMedicine)
