@@ -1,5 +1,5 @@
 using System;
-using System.Reflection;
+using System.Collections.Generic;
 using HarmonyLib;
 using Multiplayer.API;
 using Verse;
@@ -12,10 +12,11 @@ namespace Multiplayer.Compat
     internal class TrueRPGInventory
     {
         private static Action markGearDirtyAction;
-        private static bool isComputingLayout;
-
-        private static PropertyInfo gridStateCompInstanceProp;
-        private static FastInvokeHandler setPosHandler;
+        private static Type gridStateCompType;
+        private static AccessTools.FieldRef<object, Dictionary<int, int>> positionsGetter;
+        private static AccessTools.FieldRef<object, HashSet<int>> shownWeaponsGetter;
+        private static AccessTools.FieldRef<object, HashSet<int>> hiddenHelmetsGetter;
+        private static AccessTools.FieldRef<object, HashSet<int>> hiddenEyewearGetter;
 
         public TrueRPGInventory(ModContentPack mod) => LongEventHandler.ExecuteWhenFinished(LatePatch);
 
@@ -27,24 +28,15 @@ namespace Multiplayer.Compat
             var gearCommandsType = AccessTools.TypeByName("TrueRPGInventory.GearCommands");
             if (gearCommandsType != null)
             {
-                string[] gearCommandMethods = {
-                    "Wear",
-                    "Equip",
-                    "UnequipToInventory",
-                    "DropAtFeet",
-                    "DropNearby",
-                    "ToggleForced",
-                    "CycleWeapon",
-                    "MakeSidearm",
-                    "ToggleStripDesignation"
-                };
-
-                foreach (var methodName in gearCommandMethods)
-                {
-                    MP.RegisterSyncMethod(gearCommandsType, methodName)
-                        .CancelIfAnyArgNull()
-                        .SetPostInvoke((target, args) => MarkGearDirty());
-                }
+                MP.RegisterSyncMethod(gearCommandsType, "Wear").CancelIfAnyArgNull();
+                MP.RegisterSyncMethod(gearCommandsType, "Equip").CancelIfAnyArgNull();
+                MP.RegisterSyncMethod(gearCommandsType, "UnequipToInventory").CancelIfAnyArgNull();
+                MP.RegisterSyncMethod(gearCommandsType, "DropAtFeet").CancelIfAnyArgNull();
+                MP.RegisterSyncMethod(gearCommandsType, "DropNearby").CancelIfAnyArgNull();
+                MP.RegisterSyncMethod(gearCommandsType, "ToggleForced").CancelIfAnyArgNull();
+                MP.RegisterSyncMethod(gearCommandsType, "CycleWeapon").CancelIfAnyArgNull();
+                MP.RegisterSyncMethod(gearCommandsType, "MakeSidearm").CancelIfAnyArgNull();
+                MP.RegisterSyncMethod(gearCommandsType, "ToggleStripDesignation").CancelIfAnyArgNull();
             }
             else
             {
@@ -65,55 +57,66 @@ namespace Multiplayer.Compat
                 Log.Warning("[Multiplayer Compat] TrueRPGInventory: Could not find TrueRPGInventory.Patch_TradeRedirect:Prefix");
             }
 
-            // 3. GridStateComponent layout and visual settings
-            var gridStateCompType = AccessTools.TypeByName("TrueRPGInventory.GridStateComponent");
+            // 3. Sync GridStateComponent persistent layout and visual settings
+            gridStateCompType = AccessTools.TypeByName("TrueRPGInventory.GridStateComponent");
             if (gridStateCompType != null)
             {
-                gridStateCompInstanceProp = AccessTools.Property(gridStateCompType, "Instance");
+                MP.RegisterSyncMethod(gridStateCompType, "SetPos").CancelIfAnyArgNull();
+                MP.RegisterSyncMethod(gridStateCompType, "SetHeadgearHidden");
+                MP.RegisterSyncMethod(gridStateCompType, "SetShownWeapon").CancelIfAnyArgNull();
+
+                var positionsField = AccessTools.Field(gridStateCompType, "positions");
+                if (positionsField != null)
+                    positionsGetter = AccessTools.FieldRefAccess<object, Dictionary<int, int>>(positionsField);
+
+                var shownWeaponsField = AccessTools.Field(gridStateCompType, "shownWeapons");
+                if (shownWeaponsField != null)
+                    shownWeaponsGetter = AccessTools.FieldRefAccess<object, HashSet<int>>(shownWeaponsField);
+
+                var hiddenHelmetsField = AccessTools.Field(gridStateCompType, "hiddenHelmets");
+                if (hiddenHelmetsField != null)
+                    hiddenHelmetsGetter = AccessTools.FieldRefAccess<object, HashSet<int>>(hiddenHelmetsField);
+
+                var hiddenEyewearField = AccessTools.Field(gridStateCompType, "hiddenEyewear");
+                if (hiddenEyewearField != null)
+                    hiddenEyewearGetter = AccessTools.FieldRefAccess<object, HashSet<int>>(hiddenEyewearField);
+
                 var setPosMethod = AccessTools.DeclaredMethod(gridStateCompType, "SetPos");
                 if (setPosMethod != null)
-                {
-                    setPosHandler = MethodInvoker.GetHandler(setPosMethod);
-                    MpCompat.harmony.Patch(
-                        setPosMethod,
-                        prefix: new HarmonyMethod(typeof(TrueRPGInventory), nameof(PrefixSetPos))
-                    );
-                }
+                    MpCompat.harmony.Patch(setPosMethod, postfix: new HarmonyMethod(typeof(TrueRPGInventory), nameof(PostfixSyncCommandDirty)));
 
-                // Wrap GridLayoutEngine.Compute so automatic layout placement during rendering is never synced or looped
-                var computeMethod = AccessTools.DeclaredMethod("TrueRPGInventory.GridLayoutEngine:Compute");
-                if (computeMethod != null)
-                {
-                    MpCompat.harmony.Patch(
-                        computeMethod,
-                        prefix: new HarmonyMethod(typeof(TrueRPGInventory), nameof(PreCompute)),
-                        finalizer: new HarmonyMethod(typeof(TrueRPGInventory), nameof(PostCompute))
-                    );
-                }
+                var setHeadgearHiddenMethod = AccessTools.DeclaredMethod(gridStateCompType, "SetHeadgearHidden");
+                if (setHeadgearHiddenMethod != null)
+                    MpCompat.harmony.Patch(setHeadgearHiddenMethod, postfix: new HarmonyMethod(typeof(TrueRPGInventory), nameof(PostfixSyncCommandDirty)));
 
-                // Register dedicated static method for syncing manual item movements in the RPG grid
-                MP.RegisterSyncMethod(typeof(TrueRPGInventory), nameof(SyncedSetPos)).CancelIfAnyArgNull();
-
-                MP.RegisterSyncMethod(gridStateCompType, "SetHeadgearHidden")
-                    .CancelIfAnyArgNull()
-                    .SetPostInvoke((target, args) => MarkGearDirty());
-
-                MP.RegisterSyncMethod(gridStateCompType, "SetShownWeapon")
-                    .CancelIfAnyArgNull()
-                    .SetPostInvoke((target, args) => MarkGearDirty());
+                var setShownWeaponMethod = AccessTools.DeclaredMethod(gridStateCompType, "SetShownWeapon");
+                if (setShownWeaponMethod != null)
+                    MpCompat.harmony.Patch(setShownWeaponMethod, postfix: new HarmonyMethod(typeof(TrueRPGInventory), nameof(PostfixSyncCommandDirty)));
             }
             else
             {
                 Log.Warning("[Multiplayer Compat] TrueRPGInventory: Could not find TrueRPGInventory.GridStateComponent");
             }
 
-            // 4. Sync Dialog_RPGExchange item transfers
+            // 4. Invalidate TrueGearTab cache when grid positions or visual flags change
+            var hashMethod = AccessTools.DeclaredMethod("TrueRPGInventory.TrueGearTab:Hash", new[] { typeof(Pawn) });
+            if (hashMethod != null)
+            {
+                MpCompat.harmony.Patch(
+                    hashMethod,
+                    postfix: new HarmonyMethod(typeof(TrueRPGInventory), nameof(PostfixHash))
+                );
+            }
+            else
+            {
+                Log.Warning("[Multiplayer Compat] TrueRPGInventory: Could not find TrueRPGInventory.TrueGearTab:Hash");
+            }
+
+            // 5. Sync Dialog_RPGExchange item transfers
             var exchangeType = AccessTools.TypeByName("TrueRPGInventory.Dialog_RPGExchange");
             if (exchangeType != null)
             {
-                MP.RegisterSyncMethod(exchangeType, "MoveItemTo")
-                    .CancelIfAnyArgNull()
-                    .SetPostInvoke((target, args) => MarkGearDirty());
+                MP.RegisterSyncMethod(exchangeType, "MoveItemTo").CancelIfAnyArgNull();
             }
             else
             {
@@ -121,63 +124,81 @@ namespace Multiplayer.Compat
             }
         }
 
-        private static void PreCompute() => isComputingLayout = true;
-        private static void PostCompute() => isComputingLayout = false;
-
-        private static bool PrefixSetPos(object __instance, Thing t, int x, int y)
+        private static void PostfixSyncCommandDirty()
         {
-            // If called during automatic layout calculation in UI rendering, allow local execution without syncing or marking dirty
-            if (isComputingLayout)
-                return true;
-
-            if (t == null)
-                return false;
-
-            // If in multiplayer and called from player UI interaction (drag & drop)
-            if (MP.IsInMultiplayer && MP.InInterface)
+            // Only mark UI dirty when executing a synced command received over multiplayer network
+            if (MP.IsInMultiplayer && MP.IsExecutingSyncCommand)
             {
-                // Apply locally immediately for instant feedback on the dragging client
-                isComputingLayout = true;
-                try
-                {
-                    setPosHandler?.Invoke(__instance, t, x, y);
-                }
-                finally
-                {
-                    isComputingLayout = false;
-                }
-
                 MarkGearDirty();
-
-                // Send synchronized command to other clients
-                SyncedSetPos(t, x, y);
-
-                return false;
             }
-
-            return true;
         }
 
-        [SyncMethod]
-        public static void SyncedSetPos(Thing t, int x, int y)
+        private static void PostfixHash(Pawn pawn, ref int __result)
         {
-            if (t == null) return;
+            if (pawn == null || gridStateCompType == null)
+                return;
 
-            var comp = gridStateCompInstanceProp?.GetValue(null, null);
-            if (comp != null)
+            var comp = Current.Game?.GetComponent(gridStateCompType);
+            if (comp == null)
+                return;
+
+            int extraHash = 0;
+
+            var list = pawn.inventory?.innerContainer?.InnerListForReading;
+            if (positionsGetter != null && list != null)
             {
-                isComputingLayout = true;
-                try
+                var positions = positionsGetter(comp);
+                if (positions != null)
                 {
-                    setPosHandler?.Invoke(comp, t, x, y);
-                }
-                finally
-                {
-                    isComputingLayout = false;
+                    for (int i = 0; i < list.Count; i++)
+                    {
+                        var thing = list[i];
+                        if (thing != null)
+                        {
+                            if (positions.TryGetValue(thing.thingIDNumber, out int pos))
+                                extraHash = extraHash * 31 + pos;
+                            else
+                                extraHash = extraHash * 31 - 1;
+                        }
+                    }
                 }
             }
 
-            MarkGearDirty();
+            if (shownWeaponsGetter != null && list != null)
+            {
+                var shownWeapons = shownWeaponsGetter(comp);
+                if (shownWeapons != null)
+                {
+                    for (int i = 0; i < list.Count; i++)
+                    {
+                        var thing = list[i];
+                        if (thing != null && shownWeapons.Contains(thing.thingIDNumber))
+                        {
+                            extraHash = extraHash * 31 + thing.thingIDNumber;
+                        }
+                    }
+                }
+            }
+
+            if (hiddenHelmetsGetter != null)
+            {
+                var hiddenHelmets = hiddenHelmetsGetter(comp);
+                if (hiddenHelmets != null && hiddenHelmets.Contains(pawn.thingIDNumber))
+                {
+                    extraHash = extraHash * 31 + 1;
+                }
+            }
+
+            if (hiddenEyewearGetter != null)
+            {
+                var hiddenEyewear = hiddenEyewearGetter(comp);
+                if (hiddenEyewear != null && hiddenEyewear.Contains(pawn.thingIDNumber))
+                {
+                    extraHash = extraHash * 31 + 2;
+                }
+            }
+
+            __result = __result * 31 + extraHash;
         }
 
         private static void InitDirtyAction()
@@ -205,7 +226,6 @@ namespace Multiplayer.Compat
 
         private static bool CancelTradeRedirectInMp()
         {
-            // If in multiplayer, cancel the redirect so vanilla/multiplayer Dialog_Trade remains open
             return !MP.IsInMultiplayer;
         }
     }
