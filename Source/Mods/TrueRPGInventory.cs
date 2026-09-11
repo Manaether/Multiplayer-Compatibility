@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using HarmonyLib;
 using Multiplayer.API;
 using Verse;
@@ -11,13 +12,16 @@ namespace Multiplayer.Compat
     internal class TrueRPGInventory
     {
         private static Action markGearDirtyAction;
+        private static bool isComputingLayout;
+
+        private static PropertyInfo gridStateCompInstanceProp;
+        private static FastInvokeHandler setPosHandler;
 
         public TrueRPGInventory(ModContentPack mod) => LongEventHandler.ExecuteWhenFinished(LatePatch);
 
         private static void LatePatch()
         {
             InitDirtyAction();
-            var markDirtyMethod = new HarmonyMethod(typeof(TrueRPGInventory), nameof(MarkGearDirty));
 
             // 1. Sync direct gear commands
             var gearCommandsType = AccessTools.TypeByName("TrueRPGInventory.GearCommands");
@@ -37,10 +41,9 @@ namespace Multiplayer.Compat
 
                 foreach (var methodName in gearCommandMethods)
                 {
-                    MP.RegisterSyncMethod(gearCommandsType, methodName).CancelIfAnyArgNull();
-                    var method = AccessTools.DeclaredMethod(gearCommandsType, methodName);
-                    if (method != null)
-                        MpCompat.harmony.Patch(method, postfix: markDirtyMethod);
+                    MP.RegisterSyncMethod(gearCommandsType, methodName)
+                        .CancelIfAnyArgNull()
+                        .SetPostInvoke((target, args) => MarkGearDirty());
                 }
             }
             else
@@ -62,25 +65,42 @@ namespace Multiplayer.Compat
                 Log.Warning("[Multiplayer Compat] TrueRPGInventory: Could not find TrueRPGInventory.Patch_TradeRedirect:Prefix");
             }
 
-            // 3. Sync GridStateComponent persistent layout and visual settings
+            // 3. GridStateComponent layout and visual settings
             var gridStateCompType = AccessTools.TypeByName("TrueRPGInventory.GridStateComponent");
             if (gridStateCompType != null)
             {
-                MP.RegisterSyncMethod(gridStateCompType, "SetPos").CancelIfAnyArgNull();
-                MP.RegisterSyncMethod(gridStateCompType, "SetHeadgearHidden");
-                MP.RegisterSyncMethod(gridStateCompType, "SetShownWeapon").CancelIfAnyArgNull();
-
+                gridStateCompInstanceProp = AccessTools.Property(gridStateCompType, "Instance");
                 var setPosMethod = AccessTools.DeclaredMethod(gridStateCompType, "SetPos");
                 if (setPosMethod != null)
-                    MpCompat.harmony.Patch(setPosMethod, postfix: markDirtyMethod);
+                {
+                    setPosHandler = MethodInvoker.GetHandler(setPosMethod);
+                    MpCompat.harmony.Patch(
+                        setPosMethod,
+                        prefix: new HarmonyMethod(typeof(TrueRPGInventory), nameof(PrefixSetPos))
+                    );
+                }
 
-                var setHeadgearHiddenMethod = AccessTools.DeclaredMethod(gridStateCompType, "SetHeadgearHidden");
-                if (setHeadgearHiddenMethod != null)
-                    MpCompat.harmony.Patch(setHeadgearHiddenMethod, postfix: markDirtyMethod);
+                // Wrap GridLayoutEngine.Compute so automatic layout placement during rendering is never synced or looped
+                var computeMethod = AccessTools.DeclaredMethod("TrueRPGInventory.GridLayoutEngine:Compute");
+                if (computeMethod != null)
+                {
+                    MpCompat.harmony.Patch(
+                        computeMethod,
+                        prefix: new HarmonyMethod(typeof(TrueRPGInventory), nameof(PreCompute)),
+                        finalizer: new HarmonyMethod(typeof(TrueRPGInventory), nameof(PostCompute))
+                    );
+                }
 
-                var setShownWeaponMethod = AccessTools.DeclaredMethod(gridStateCompType, "SetShownWeapon");
-                if (setShownWeaponMethod != null)
-                    MpCompat.harmony.Patch(setShownWeaponMethod, postfix: markDirtyMethod);
+                // Register dedicated static method for syncing manual item movements in the RPG grid
+                MP.RegisterSyncMethod(typeof(TrueRPGInventory), nameof(SyncedSetPos)).CancelIfAnyArgNull();
+
+                MP.RegisterSyncMethod(gridStateCompType, "SetHeadgearHidden")
+                    .CancelIfAnyArgNull()
+                    .SetPostInvoke((target, args) => MarkGearDirty());
+
+                MP.RegisterSyncMethod(gridStateCompType, "SetShownWeapon")
+                    .CancelIfAnyArgNull()
+                    .SetPostInvoke((target, args) => MarkGearDirty());
             }
             else
             {
@@ -91,15 +111,73 @@ namespace Multiplayer.Compat
             var exchangeType = AccessTools.TypeByName("TrueRPGInventory.Dialog_RPGExchange");
             if (exchangeType != null)
             {
-                MP.RegisterSyncMethod(exchangeType, "MoveItemTo").CancelIfAnyArgNull();
-                var moveItemToMethod = AccessTools.DeclaredMethod(exchangeType, "MoveItemTo");
-                if (moveItemToMethod != null)
-                    MpCompat.harmony.Patch(moveItemToMethod, postfix: markDirtyMethod);
+                MP.RegisterSyncMethod(exchangeType, "MoveItemTo")
+                    .CancelIfAnyArgNull()
+                    .SetPostInvoke((target, args) => MarkGearDirty());
             }
             else
             {
                 Log.Warning("[Multiplayer Compat] TrueRPGInventory: Could not find TrueRPGInventory.Dialog_RPGExchange");
             }
+        }
+
+        private static void PreCompute() => isComputingLayout = true;
+        private static void PostCompute() => isComputingLayout = false;
+
+        private static bool PrefixSetPos(object __instance, Thing t, int x, int y)
+        {
+            // If called during automatic layout calculation in UI rendering, allow local execution without syncing or marking dirty
+            if (isComputingLayout)
+                return true;
+
+            if (t == null)
+                return false;
+
+            // If in multiplayer and called from player UI interaction (drag & drop)
+            if (MP.IsInMultiplayer && MP.InInterface)
+            {
+                // Apply locally immediately for instant feedback on the dragging client
+                isComputingLayout = true;
+                try
+                {
+                    setPosHandler?.Invoke(__instance, t, x, y);
+                }
+                finally
+                {
+                    isComputingLayout = false;
+                }
+
+                MarkGearDirty();
+
+                // Send synchronized command to other clients
+                SyncedSetPos(t, x, y);
+
+                return false;
+            }
+
+            return true;
+        }
+
+        [SyncMethod]
+        public static void SyncedSetPos(Thing t, int x, int y)
+        {
+            if (t == null) return;
+
+            var comp = gridStateCompInstanceProp?.GetValue(null, null);
+            if (comp != null)
+            {
+                isComputingLayout = true;
+                try
+                {
+                    setPosHandler?.Invoke(comp, t, x, y);
+                }
+                finally
+                {
+                    isComputingLayout = false;
+                }
+            }
+
+            MarkGearDirty();
         }
 
         private static void InitDirtyAction()
