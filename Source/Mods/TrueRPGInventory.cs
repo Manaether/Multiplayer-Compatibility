@@ -10,23 +10,38 @@ namespace Multiplayer.Compat
     [MpCompatFor("astryl.truerpginventory")]
     internal class TrueRPGInventory
     {
+        private static Action markGearDirtyAction;
+
         public TrueRPGInventory(ModContentPack mod) => LongEventHandler.ExecuteWhenFinished(LatePatch);
 
         private static void LatePatch()
         {
+            InitDirtyAction();
+            var markDirtyMethod = new HarmonyMethod(typeof(TrueRPGInventory), nameof(MarkGearDirty));
+
             // 1. Sync direct gear commands
             var gearCommandsType = AccessTools.TypeByName("TrueRPGInventory.GearCommands");
             if (gearCommandsType != null)
             {
-                MP.RegisterSyncMethod(gearCommandsType, "Wear").CancelIfAnyArgNull();
-                MP.RegisterSyncMethod(gearCommandsType, "Equip").CancelIfAnyArgNull();
-                MP.RegisterSyncMethod(gearCommandsType, "UnequipToInventory").CancelIfAnyArgNull();
-                MP.RegisterSyncMethod(gearCommandsType, "DropAtFeet").CancelIfAnyArgNull();
-                MP.RegisterSyncMethod(gearCommandsType, "DropNearby").CancelIfAnyArgNull();
-                MP.RegisterSyncMethod(gearCommandsType, "ToggleForced").CancelIfAnyArgNull();
-                MP.RegisterSyncMethod(gearCommandsType, "CycleWeapon").CancelIfAnyArgNull();
-                MP.RegisterSyncMethod(gearCommandsType, "MakeSidearm").CancelIfAnyArgNull();
-                MP.RegisterSyncMethod(gearCommandsType, "ToggleStripDesignation").CancelIfAnyArgNull();
+                string[] gearCommandMethods = {
+                    "Wear",
+                    "Equip",
+                    "UnequipToInventory",
+                    "DropAtFeet",
+                    "DropNearby",
+                    "ToggleForced",
+                    "CycleWeapon",
+                    "MakeSidearm",
+                    "ToggleStripDesignation"
+                };
+
+                foreach (var methodName in gearCommandMethods)
+                {
+                    MP.RegisterSyncMethod(gearCommandsType, methodName).CancelIfAnyArgNull();
+                    var method = AccessTools.DeclaredMethod(gearCommandsType, methodName);
+                    if (method != null)
+                        MpCompat.harmony.Patch(method, postfix: markDirtyMethod);
+                }
             }
             else
             {
@@ -54,6 +69,18 @@ namespace Multiplayer.Compat
                 MP.RegisterSyncMethod(gridStateCompType, "SetPos").CancelIfAnyArgNull();
                 MP.RegisterSyncMethod(gridStateCompType, "SetHeadgearHidden");
                 MP.RegisterSyncMethod(gridStateCompType, "SetShownWeapon").CancelIfAnyArgNull();
+
+                var setPosMethod = AccessTools.DeclaredMethod(gridStateCompType, "SetPos");
+                if (setPosMethod != null)
+                    MpCompat.harmony.Patch(setPosMethod, postfix: markDirtyMethod);
+
+                var setHeadgearHiddenMethod = AccessTools.DeclaredMethod(gridStateCompType, "SetHeadgearHidden");
+                if (setHeadgearHiddenMethod != null)
+                    MpCompat.harmony.Patch(setHeadgearHiddenMethod, postfix: markDirtyMethod);
+
+                var setShownWeaponMethod = AccessTools.DeclaredMethod(gridStateCompType, "SetShownWeapon");
+                if (setShownWeaponMethod != null)
+                    MpCompat.harmony.Patch(setShownWeaponMethod, postfix: markDirtyMethod);
             }
             else
             {
@@ -65,11 +92,37 @@ namespace Multiplayer.Compat
             if (exchangeType != null)
             {
                 MP.RegisterSyncMethod(exchangeType, "MoveItemTo").CancelIfAnyArgNull();
+                var moveItemToMethod = AccessTools.DeclaredMethod(exchangeType, "MoveItemTo");
+                if (moveItemToMethod != null)
+                    MpCompat.harmony.Patch(moveItemToMethod, postfix: markDirtyMethod);
             }
             else
             {
                 Log.Warning("[Multiplayer Compat] TrueRPGInventory: Could not find TrueRPGInventory.Dialog_RPGExchange");
             }
+        }
+
+        private static void InitDirtyAction()
+        {
+            var notifyGearMutatedMethod = AccessTools.DeclaredMethod("TrueRPGInventory.TrueGearTab:NotifyGearMutated");
+            if (notifyGearMutatedMethod != null)
+            {
+                markGearDirtyAction = (Action)Delegate.CreateDelegate(typeof(Action), notifyGearMutatedMethod);
+            }
+            else
+            {
+                var dirtyField = AccessTools.DeclaredField("TrueRPGInventory.TrueGearTab:Dirty");
+                if (dirtyField != null)
+                {
+                    var dirtyRef = AccessTools.StaticFieldRefAccess<bool>(dirtyField);
+                    markGearDirtyAction = () => dirtyRef() = true;
+                }
+            }
+        }
+
+        private static void MarkGearDirty()
+        {
+            markGearDirtyAction?.Invoke();
         }
 
         private static bool CancelTradeRedirectInMp()
