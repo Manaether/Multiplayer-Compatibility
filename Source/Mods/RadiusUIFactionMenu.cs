@@ -10,7 +10,9 @@ namespace Multiplayer.Compat
     [MpCompatFor("astryl.RadiusUI.FactionMenu")]
     internal class RadiusUIFactionMenu
     {
-        public RadiusUIFactionMenu(ModContentPack mod)
+        public RadiusUIFactionMenu(ModContentPack mod) => LongEventHandler.ExecuteWhenFinished(LatePatch);
+
+        private static void LatePatch()
         {
             // Register DialogNodeTree sync for comms console opened from Faction Menu
             var uiType = AccessTools.TypeByName("RadiusUI.FactionMenu.UI.Ui");

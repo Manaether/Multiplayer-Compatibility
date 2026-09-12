@@ -17,7 +17,9 @@ namespace Multiplayer.Compat
     {
         private static MethodInfo teleportMethod;
 
-        public ModernCC(ModContentPack mod)
+        public ModernCC(ModContentPack mod) => LongEventHandler.ExecuteWhenFinished(LatePatch);
+
+        private static void LatePatch()
         {
             // 1. Block opening Character Editor mid-game in multiplayer to prevent raw in-memory mutations
             var editorType = AccessTools.TypeByName("MCE.Window_CharacterEditor");

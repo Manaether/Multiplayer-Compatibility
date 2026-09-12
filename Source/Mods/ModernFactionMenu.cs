@@ -10,7 +10,9 @@ namespace Multiplayer.Compat
     [MpCompatFor("astryl.modernfactionmenu")]
     internal class ModernFactionMenu
     {
-        public ModernFactionMenu(ModContentPack mod)
+        public ModernFactionMenu(ModContentPack mod) => LongEventHandler.ExecuteWhenFinished(LatePatch);
+
+        private static void LatePatch()
         {
             var windowType = AccessTools.TypeByName("ModernFactionMenu.Window_ModernFactions");
             if (windowType != null)

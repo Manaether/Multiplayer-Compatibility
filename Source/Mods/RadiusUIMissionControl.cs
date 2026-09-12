@@ -21,7 +21,9 @@ namespace Multiplayer.Compat
         private static MethodInfo togglePausedMethod;
         private static PropertyInfo curTimeSpeedUIProp;
 
-        public RadiusUIMissionControl(ModContentPack mod)
+        public RadiusUIMissionControl(ModContentPack mod) => LongEventHandler.ExecuteWhenFinished(LatePatch);
+
+        private static void LatePatch()
         {
             var timeControlPatchType = AccessTools.TypeByName("Multiplayer.Client.AsyncTime.TimeControlPatch");
             timeVoteType = AccessTools.TypeByName("Multiplayer.Common.TimeVote");

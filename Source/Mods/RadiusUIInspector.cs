@@ -16,7 +16,9 @@ namespace Multiplayer.Compat
         private static ISyncField syncSelfTend;
         private static ISyncField syncHostilityResponse;
 
-        public RadiusUIInspector(ModContentPack mod)
+        public RadiusUIInspector(ModContentPack mod) => LongEventHandler.ExecuteWhenFinished(LatePatch);
+
+        private static void LatePatch()
         {
             var syncFieldsType = AccessTools.TypeByName("Multiplayer.Client.SyncFields");
             syncMedCare = (ISyncField)AccessTools.Field(syncFieldsType, "SyncMedCare")?.GetValue(null);

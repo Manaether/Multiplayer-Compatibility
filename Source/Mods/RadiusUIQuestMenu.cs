@@ -20,7 +20,9 @@ namespace Multiplayer.Compat
         private static MethodInfo modelSetDirtyMethod;
         private static FieldInfo modelField;
 
-        public RadiusUIQuestMenu(ModContentPack mod)
+        public RadiusUIQuestMenu(ModContentPack mod) => LongEventHandler.ExecuteWhenFinished(LatePatch);
+
+        private static void LatePatch()
         {
             var syncFieldsType = AccessTools.TypeByName("Multiplayer.Client.SyncFields");
             syncQuestDismissed = (ISyncField)AccessTools.Field(syncFieldsType, "SyncQuestDismissed")?.GetValue(null);

@@ -13,7 +13,9 @@ namespace Multiplayer.Compat
     [MpCompatFor("astryl.ModernHistoryMenu")]
     internal class ModernHistoryMenu
     {
-        public ModernHistoryMenu(ModContentPack mod)
+        public ModernHistoryMenu(ModContentPack mod) => LongEventHandler.ExecuteWhenFinished(LatePatch);
+
+        private static void LatePatch()
         {
             // 1. HistoryAutoRecorderWorker_RealPlaytimeHours:PullRecord
             var pullRecordMethod = AccessTools.Method("HistoryExpanded.HistoryAutoRecorderWorker_RealPlaytimeHours:PullRecord");

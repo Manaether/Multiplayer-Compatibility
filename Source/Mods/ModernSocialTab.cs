@@ -17,8 +17,20 @@ namespace Multiplayer.Compat
         private static Type compType;
         private static FieldInfo pinnedPawnsField;
 
-        public ModernSocialTab(ModContentPack mod)
+        public ModernSocialTab(ModContentPack mod) => LongEventHandler.ExecuteWhenFinished(LatePatch);
+
+        private static void LatePatch()
         {
+            var texType = AccessTools.TypeByName("ModernSocialTab.SocialTex");
+            if (texType != null)
+            {
+                var pinField = AccessTools.Field(texType, "Pin");
+                if (pinField != null && pinField.GetValue(null) == null)
+                {
+                    texType.TypeInitializer?.Invoke(null, null);
+                }
+            }
+
             compType = AccessTools.TypeByName("ModernSocialTab.ModernSocialTabGameComp");
             pinnedPawnsField = AccessTools.Field(compType, "PinnedPawns");
 

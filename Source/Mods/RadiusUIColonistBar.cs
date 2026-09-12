@@ -14,7 +14,9 @@ namespace Multiplayer.Compat
     {
         private static readonly Dictionary<string, Graphic> graphicCache = new();
 
-        public RadiusUIColonistBar(ModContentPack mod)
+        public RadiusUIColonistBar(ModContentPack mod) => LongEventHandler.ExecuteWhenFinished(LatePatch);
+
+        private static void LatePatch()
         {
             var graphicForMethod = AccessTools.Method("RadiusColonistBar.KitPreview:GraphicFor");
             if (graphicForMethod != null)

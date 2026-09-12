@@ -10,7 +10,9 @@ namespace Multiplayer.Compat
     [MpCompatFor("astryl.modernquestmenu")]
     internal class ModernQuestMenu
     {
-        public ModernQuestMenu(ModContentPack mod)
+        public ModernQuestMenu(ModContentPack mod) => LongEventHandler.ExecuteWhenFinished(LatePatch);
+
+        private static void LatePatch()
         {
             var compType = AccessTools.TypeByName("ModernQuestMenu.ModernQuestMenuGameComp");
             if (compType != null)
