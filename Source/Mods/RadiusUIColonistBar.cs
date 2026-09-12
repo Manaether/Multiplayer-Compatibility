@@ -14,16 +14,26 @@ namespace Multiplayer.Compat
     {
         private static readonly Dictionary<string, Graphic> graphicCache = new();
 
-        public RadiusUIColonistBar(ModContentPack mod) => LongEventHandler.ExecuteWhenFinished(LatePatch);
+        private static bool patched;
 
-        private static void LatePatch()
+        public RadiusUIColonistBar(ModContentPack mod)
         {
+            TryPatch();
+            LongEventHandler.ExecuteWhenFinished(TryPatch);
+        }
+
+        private static void TryPatch()
+        {
+            if (patched)
+                return;
+
             var graphicForMethod = AccessTools.Method("RadiusColonistBar.KitPreview:GraphicFor");
             if (graphicForMethod != null)
             {
                 MpCompat.harmony.Patch(
                     graphicForMethod,
                     prefix: new HarmonyMethod(typeof(RadiusUIColonistBar), nameof(PrefixGraphicFor)));
+                patched = true;
             }
         }
 
