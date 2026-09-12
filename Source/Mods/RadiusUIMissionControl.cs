@@ -58,6 +58,17 @@ namespace Multiplayer.Compat
                 togglePausedMethodRef,
                 prefix: new HarmonyMethod(typeof(RadiusUIMissionControl), nameof(PrefixTogglePaused)));
 
+            // Provide MP's CurTimeSpeedUI to Mission Control when it queries TickManager
+            var getCurTimeSpeedMethod = AccessTools.PropertyGetter(typeof(TickManager), nameof(TickManager.CurTimeSpeed));
+            MpCompat.harmony.Patch(
+                getCurTimeSpeedMethod,
+                prefix: new HarmonyMethod(typeof(RadiusUIMissionControl), nameof(PrefixGetCurTimeSpeed)));
+
+            var getPausedMethod = AccessTools.PropertyGetter(typeof(TickManager), nameof(TickManager.Paused));
+            MpCompat.harmony.Patch(
+                getPausedMethod,
+                prefix: new HarmonyMethod(typeof(RadiusUIMissionControl), nameof(PrefixGetPaused)));
+
             // Transpile OccasionsTracker.CheckReminders to make reminder evaluation deterministic in MP
             var occasionsTrackerType = AccessTools.TypeByName("RadiusUI.MissionControl.OccasionsTracker");
             var checkRemindersMethod = AccessTools.Method(occasionsTrackerType, "CheckReminders");
@@ -69,21 +80,75 @@ namespace Multiplayer.Compat
             }
         }
 
-        private static void PreGlobalControlsDraw()
+        private static void PreGlobalControlsDraw() => inGlobalControlsDraw = true;
+        private static void PostGlobalControlsDraw() => inGlobalControlsDraw = false;
+
+        private static int GetCurrentTimeVoteInt()
         {
-            inGlobalControlsDraw = true;
+            if (curTimeSpeedUIProp != null)
+            {
+                try
+                {
+                    var cur = curTimeSpeedUIProp.GetValue(null);
+                    if (cur != null)
+                        return Convert.ToInt32(cur);
+                }
+                catch
+                {
+                    // Ignore reflection/unboxing failures
+                }
+            }
+
+            return (int)(Find.TickManager?.curTimeSpeed ?? TimeSpeed.Normal);
         }
 
-        private static void PostGlobalControlsDraw()
+        private static bool PrefixGetCurTimeSpeed(ref TimeSpeed __result)
         {
-            inGlobalControlsDraw = false;
+            if (MP.IsInMultiplayer && inGlobalControlsDraw)
+            {
+                try
+                {
+                    __result = (TimeSpeed)GetCurrentTimeVoteInt();
+                    return false;
+                }
+                catch
+                {
+                    return true; // Let vanilla handle it if state is invalid
+                }
+            }
+            return true;
+        }
+
+        private static bool PrefixGetPaused(ref bool __result)
+        {
+            if (MP.IsInMultiplayer && inGlobalControlsDraw)
+            {
+                try
+                {
+                    __result = GetCurrentTimeVoteInt() == 0; // TimeSpeed.Paused == 0
+                    return false;
+                }
+                catch
+                {
+                    return true;
+                }
+            }
+            return true;
         }
 
         private static bool PrefixSetCurTimeSpeed(TimeSpeed value)
         {
             if (MP.IsInMultiplayer && inGlobalControlsDraw)
             {
-                SendVote((int)value);
+                // Never mutate time speed on passive GUI render passes
+                if (Event.current != null && (Event.current.type == EventType.Repaint || Event.current.type == EventType.Layout))
+                    return false;
+
+                int requestedSpeed = (int)value;
+                if (requestedSpeed == GetCurrentTimeVoteInt())
+                    return false; // Speed hasn't changed; suppress duplicate votes and sound spam
+
+                SendVote(requestedSpeed);
                 return false;
             }
             return true;
@@ -93,6 +158,9 @@ namespace Multiplayer.Compat
         {
             if (MP.IsInMultiplayer && inGlobalControlsDraw)
             {
+                if (Event.current != null && (Event.current.type == EventType.Repaint || Event.current.type == EventType.Layout))
+                    return false;
+
                 SendPauseToggle();
                 return false;
             }
@@ -122,7 +190,6 @@ namespace Multiplayer.Compat
         {
             if (MP.IsInMultiplayer)
             {
-                // In MP, use simulation ticks so all players evaluate reminders at the identical tick
                 return (Find.TickManager?.TicksGame ?? 0) / 60f;
             }
             return Time.realtimeSinceStartup;
