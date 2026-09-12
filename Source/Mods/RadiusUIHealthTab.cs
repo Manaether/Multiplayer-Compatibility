@@ -46,14 +46,16 @@ namespace Multiplayer.Compat
             MpCompat.harmony.Patch(
                 AccessTools.Method(drawerType, "Draw", new[] { typeof(Rect), typeof(Pawn), typeof(Thing) }),
                 prefix: new HarmonyMethod(typeof(RadiusUIHealthTab), nameof(PreDrawHealthTab)),
-                postfix: new HarmonyMethod(typeof(RadiusUIHealthTab), nameof(PostDrawHealthTab)));
+                postfix: new HarmonyMethod(typeof(RadiusUIHealthTab), nameof(PostDrawHealthTab)),
+                finalizer: new HarmonyMethod(typeof(RadiusUIHealthTab), nameof(FinalizeDrawHealthTab)));
 
             // ModernDropdown: Watch medCare & selfTend during dropdown click executions
             var modernDropdownType = AccessTools.TypeByName("RadiusUI.HealthTab.ModernDropdown");
             MpCompat.harmony.Patch(
                 AccessTools.Method(modernDropdownType, nameof(Window.DoWindowContents)),
                 prefix: new HarmonyMethod(typeof(RadiusUIHealthTab), nameof(PreDoDropdownContents)),
-                postfix: new HarmonyMethod(typeof(RadiusUIHealthTab), nameof(PostDoDropdownContents)));
+                postfix: new HarmonyMethod(typeof(RadiusUIHealthTab), nameof(PostDoDropdownContents)),
+                finalizer: new HarmonyMethod(typeof(RadiusUIHealthTab), nameof(FinalizeDoDropdownContents)));
         }
 
         private static bool PrefixEnforce()
@@ -64,34 +66,53 @@ namespace Multiplayer.Compat
             return !MP.IsInMultiplayer;
         }
 
-        private static void PreDrawHealthTab(Pawn pawn)
+        private static void PreDrawHealthTab(Pawn pawn, out bool __state)
         {
-            if (!MP.IsInMultiplayer || pawn == null)
+            __state = false;
+            // Enemy pawns, wild animals, and non-colony entities do not have playerSettings.
+            // Watching medCare/selfTend on them throws a NullReferenceException in MpReflection getter.
+            if (!MP.IsInMultiplayer || pawn?.playerSettings == null)
                 return;
 
             MP.WatchBegin();
+            __state = true;
             syncMedCare?.Watch(pawn);
             syncSelfTend?.Watch(pawn);
         }
 
-        private static void PostDrawHealthTab()
+        private static void PostDrawHealthTab(ref bool __state)
         {
-            if (MP.IsInMultiplayer)
+            if (__state)
+            {
+                __state = false;
                 MP.WatchEnd();
+            }
         }
 
-        private static void PreDoDropdownContents()
+        private static Exception FinalizeDrawHealthTab(Exception __exception, ref bool __state)
         {
+            if (__state)
+            {
+                __state = false;
+                MP.WatchEnd();
+            }
+            return __exception;
+        }
+
+        private static void PreDoDropdownContents(out bool __state)
+        {
+            __state = false;
             if (!MP.IsInMultiplayer)
                 return;
 
             MP.WatchBegin();
+            __state = true;
             var pawns = PawnsFinder.AllMapsCaravansAndTravellingTransporters_Alive_OfPlayerFaction;
             if (pawns != null)
             {
                 foreach (var p in pawns)
                 {
-                    if (p != null)
+                    if (p?.playerSettings != null)
                     {
                         syncMedCare?.Watch(p);
                         syncSelfTend?.Watch(p);
@@ -100,10 +121,23 @@ namespace Multiplayer.Compat
             }
         }
 
-        private static void PostDoDropdownContents()
+        private static void PostDoDropdownContents(ref bool __state)
         {
-            if (MP.IsInMultiplayer)
+            if (__state)
+            {
+                __state = false;
                 MP.WatchEnd();
+            }
+        }
+
+        private static Exception FinalizeDoDropdownContents(Exception __exception, ref bool __state)
+        {
+            if (__state)
+            {
+                __state = false;
+                MP.WatchEnd();
+            }
+            return __exception;
         }
     }
 }

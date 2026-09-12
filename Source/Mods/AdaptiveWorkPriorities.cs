@@ -1006,18 +1006,26 @@ namespace Multiplayer.Compat
             if (!MP.IsInMultiplayer)
                 return true;
 
-            var settings = GetSettings();
-            int ticksGame = Find.TickManager.TicksGame;
-            int kindInt = kind != null ? (int)kind : 0;
-            if (settings != null && settingsToastsLearningField != null && settingsToastsLearningField(settings) && kindInt != 2 && kindInt != 3 && (ticksGame - lastLearnAtTick >= 300 || lastLearnAtTick > ticksGame))
+            try
             {
-                lastLearnAtTick = ticksGame;
-                if (pawn != null && wt != null)
+                var settings = GetSettings();
+                int ticksGame = Find.TickManager?.TicksGame ?? 0;
+                int kindInt = kind != null ? Convert.ToInt32(kind) : 0;
+                if (settings != null && settingsToastsLearningField != null && settingsToastsLearningField(settings) && kindInt != 2 && kindInt != 3 && (ticksGame - lastLearnAtTick >= 300 || lastLearnAtTick > ticksGame))
                 {
-                    string wtLabel = wt.labelShort.NullOrEmpty() ? wt.label : wt.labelShort;
-                    Messages.Message("AW.Msg.Learned".Translate(pawn.LabelShortCap, wtLabel), pawn, MessageTypeDefOf.SilentInput, false);
+                    lastLearnAtTick = ticksGame;
+                    if (pawn != null && wt != null)
+                    {
+                        string wtLabel = wt.labelShort.NullOrEmpty() ? wt.label : wt.labelShort;
+                        Messages.Message("AW.Msg.Learned".Translate(pawn.LabelShortCap, wtLabel), pawn, MessageTypeDefOf.SilentInput, false);
+                    }
                 }
             }
+            catch (Exception ex)
+            {
+                Log.Warning($"[MpCompat] AdaptiveWorkPriorities: Error in PrefixNotifySignal: {ex}");
+            }
+
             return false;
         }
 
@@ -1026,19 +1034,27 @@ namespace Multiplayer.Compat
             if (!MP.IsInMultiplayer)
                 return true;
 
-            var settings = GetSettings();
-            int ticksGame = Find.TickManager.TicksGame;
-            if (settings != null && settingsToastsSuggestField != null && settingsToastsSuggestField(settings) && (ticksGame - lastAppliedAtTick >= 240 || lastAppliedAtTick > ticksGame))
+            try
             {
-                lastAppliedAtTick = ticksGame;
-                if (pawn != null && wt != null)
+                var settings = GetSettings();
+                int ticksGame = Find.TickManager?.TicksGame ?? 0;
+                if (settings != null && settingsToastsSuggestField != null && settingsToastsSuggestField(settings) && (ticksGame - lastAppliedAtTick >= 240 || lastAppliedAtTick > ticksGame))
                 {
-                    string wtLabel = wt.labelShort.NullOrEmpty() ? wt.label : wt.labelShort;
-                    string fromStr = from == 0 ? (string)"AW.Off".Translate() : from.ToString();
-                    string toStr = to == 0 ? (string)"AW.Off".Translate() : to.ToString();
-                    Messages.Message("AW.Msg.Applied".Translate(pawn.LabelShortCap, wtLabel, fromStr, toStr), pawn, MessageTypeDefOf.SilentInput, false);
+                    lastAppliedAtTick = ticksGame;
+                    if (pawn != null && wt != null)
+                    {
+                        string wtLabel = wt.labelShort.NullOrEmpty() ? wt.label : wt.labelShort;
+                        string fromStr = from == 0 ? (string)"AW.Off".Translate() : from.ToString();
+                        string toStr = to == 0 ? (string)"AW.Off".Translate() : to.ToString();
+                        Messages.Message("AW.Msg.Applied".Translate(pawn.LabelShortCap, wtLabel, fromStr, toStr), pawn, MessageTypeDefOf.SilentInput, false);
+                    }
                 }
             }
+            catch (Exception ex)
+            {
+                Log.Warning($"[MpCompat] AdaptiveWorkPriorities: Error in PrefixNotifyApplied: {ex}");
+            }
+
             return false;
         }
 
@@ -1062,7 +1078,16 @@ namespace Multiplayer.Compat
             if (!MP.IsInMultiplayer)
                 return true;
 
-            SyncedApplyAll(Find.CurrentMap, (int)cohort);
+            try
+            {
+                int cohortInt = cohort != null ? Convert.ToInt32(cohort) : 0;
+                SyncedApplyAll(Find.CurrentMap, cohortInt);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"[MpCompat] AdaptiveWorkPriorities: Error in PrefixApplyAllVisible: {ex}");
+            }
+
             return false;
         }
 
