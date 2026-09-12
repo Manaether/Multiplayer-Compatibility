@@ -128,8 +128,21 @@ namespace Multiplayer.Compat
         private static readonly Dictionary<(int mapId, int mechs, ushort wtIndex), int> multiMapCoverage = new();
         private static int lastCoverageTick = -1;
 
-        public AdaptiveWorkPriorities(ModContentPack mod)
+        public AdaptiveWorkPriorities(ModContentPack mod) => LongEventHandler.ExecuteWhenFinished(LatePatch);
+
+        private static void LatePatch()
         {
+            // Ensure textures in AWTex are initialized on the main thread if needed
+            var awTexType = AccessTools.TypeByName("AdaptiveWork.Core.AWTex");
+            if (awTexType != null)
+            {
+                var workAtlasField = AccessTools.Field(awTexType, "WorkAtlas");
+                if (workAtlasField != null && workAtlasField.GetValue(null) == null)
+                {
+                    awTexType.TypeInitializer?.Invoke(null, null);
+                }
+            }
+
             // Resolve Mod Types
             learningStoreType = AccessTools.TypeByName("AdaptiveWork.Data.LearningStore");
             proposalType = AccessTools.TypeByName("AdaptiveWork.Model.Proposal");
